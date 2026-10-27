@@ -42,6 +42,7 @@ tests = TestList
         assertBool "nonzero command reports an error" (isLeft failed)
     , "IANA clock daylight saving and date rollover" ~: TestCase $ do
         london <- loadClockZone "Europe/London"
+        munich <- loadClockZone "Europe/Berlin"
         sydney <- loadClockZone "Australia/Sydney"
         let winter = UTCTime (fromGregorian 2026 1 15) (secondsToDiffTime (12 * 3600))
             summer = UTCTime (fromGregorian 2026 7 15) (secondsToDiffTime (12 * 3600))
@@ -51,6 +52,10 @@ tests = TestList
         assertEqual "Sydney summer" "2300" (formatClock sydney "%H%M" winter)
         assertEqual "Sydney winter" "2200" (formatClock sydney "%H%M" summer)
         assertEqual "Sydney next date" "2026-01-16 1000" (formatClock sydney "%Y-%m-%d %H%M" late)
+        let example = UTCTime (fromGregorian 2026 1 15) (secondsToDiffTime (22 * 3600 + 20 * 60))
+        assertEqual "Munich HH:MM" "23:20" (formatClock munich "%H:%M" example)
+        assertEqual "London HH:MM" "22:20" (formatClock london "%H:%M" example)
+        assertEqual "Sydney HH:MM and leading zero" "09:20" (formatClock sydney "%H:%M" example)
     , "runtime repaints and clears unused keys" ~: TestCase $ within $ do
         harness <- newHarness
         withRuntime harness rememberedLayout $ do

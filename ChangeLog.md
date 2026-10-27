@@ -2,6 +2,12 @@
 
 ## Unreleased changes
 
+- Bundle DejaVu Sans and add `loadTextFont`, two-line `renderLabeledText`, and
+  `labeledClockImage` with independently fitted title/value and stable clock digits.
+- Update the cycling clock to Munich, London, and Sydney, with each city above
+  an `HH:MM` time using IANA timezone rules.
+- Test two-line fitting, punctuation, clock formatting, leading zeroes, and stable
+  numeric layout; document the bundled text font and labeled clock API.
 - Replace the external `xdotool` keyboard action with a native X11/XTest backend.
 - Resolve keysyms in the active keyboard layout, serialize complete chords, and
   restore held keys, modifier locks/latches, and keyboard groups after injection.

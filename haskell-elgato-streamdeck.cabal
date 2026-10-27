@@ -27,11 +27,14 @@ extra-source-files:
     examples/FontAwesome.hs
     examples/Pages.hs
     fonts/fontawesome/README.md
+    fonts/dejavu/README.md
 data-files:
     fonts/fontawesome/fa-brands-400.ttf
     fonts/fontawesome/fa-regular-400.ttf
     fonts/fontawesome/fa-solid-900.ttf
     fonts/fontawesome/LICENSE.txt
+    fonts/dejavu/DejaVuSans.ttf
+    fonts/dejavu/LICENSE.txt
 
 source-repository head
   type: git

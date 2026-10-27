@@ -77,6 +77,56 @@ tests = TestList
             assertBool "reject blank, multiline, control, or missing glyph" $
                 isLeft (renderText font defaultIconStyle invalid)
         assertBool "reject invalid font data" (isLeft (decodeFont BS.empty))
+    , "bundled text font and labeled clock faces" ~: TestCase $ do
+        font <- loadTextFont
+        assertBool "text font contains mixed-case names and colon" (all (hasGlyph font) "MunichLondonSydney09:20")
+        forM_ [("Munich", "23:20"), ("London", "22:20"), ("Sydney", "09:20")] $ \(city, value) -> do
+            image <- right (renderLabeledText font defaultIconStyle { padding = 4 } city value)
+            decoded <- upright image
+            (left, top, rightEdge, bottom) <- bandBounds decoded 0 30
+            (valueLeft, valueTop, valueRight, valueBottom) <- bandBounds decoded 32 71
+            assertBool "title fits and is centered"
+                (left >= 3 && rightEdge <= 68 && abs (left + rightEdge - 71) <= 4 && top >= 3)
+            assertBool "value fits and is centered"
+                (valueLeft >= 3 && valueRight <= 68 && abs (valueLeft + valueRight - 71) <= 4 && valueBottom <= 68)
+            assertBool "lines have visible separation" (valueTop - bottom >= 5)
+            assertBool "time is larger than title" (valueBottom - valueTop > bottom - top)
+    , "clock digits keep a stable size and colon position" ~: TestCase $ do
+        font <- loadTextFont
+        rendered <- mapM (\value -> upright =<< right (renderLabeledText font
+            defaultIconStyle { padding = 4 } "Munich" value)) ["11:11", "23:20", "09:20", "00:00", "88:88"]
+        extents <- mapM (\image -> do
+            (_, top, _, bottom) <- bandBounds image 32 71
+            pure (top, bottom)) rendered
+        assertBool "stable time baseline and height"
+            (maximum (map fst extents) - minimum (map fst extents) <= 1 &&
+             maximum (map snd extents) - minimum (map snd extents) <= 1)
+        let colon image = case [(x, y) | y <- [32..67], x <- [34..39], visible (pixelAt image x y)] of
+                [] -> Nothing
+                (x, y) : rest -> Just $ foldl'
+                    (\(left, top, rightEdge, bottom) (px, py) ->
+                        (min left px, min top py, max rightEdge px, max bottom py)) (x, y, x, y) rest
+        case rendered of
+            first : rest -> do
+                assertBool "colon is visible" (colon first /= Nothing)
+                forM_ rest $ \image -> case (colon first, colon image) of
+                    (Just (a,b,c,d), Just (w,x,y,z)) ->
+                        -- Neighboring digits affect lossy JPEG edge pixels.
+                        assertBool "colon position and size are stable within JPEG rounding"
+                            (all (<= 1) [abs (a-w), abs (b-x), abs (c-y), abs (d-z)])
+                    _ -> assertFailure "Missing colon"
+            [] -> assertFailure "Missing test images"
+    , "labeled text validation and long titles" ~: TestCase $ do
+        font <- loadTextFont
+        forM_ [("", "12:34"), ("Munich", ""), (" ", "12:34"), ("Munich\nLondon", "12:34"),
+               ("Munich", "12\t34"), ("\x10ffff", "12:34")] $ \(title, value) ->
+            assertBool "reject invalid line" (isLeft (renderLabeledText font defaultIconStyle title value))
+        forM_ [-1, 36] $ \inset -> assertBool "reject invalid padding" $
+            isLeft (renderLabeledText font defaultIconStyle { padding = inset } "Munich" "12:34")
+        image <- upright =<< right (renderLabeledText font defaultIconStyle { padding = 4 }
+            "A very long city name" "12:34")
+        (left, top, rightEdge, _) <- bandBounds image 0 30
+        assertBool "long title shrinks without clipping" (left >= 3 && rightEdge <= 68 && top >= 3)
     , "PNG preview is upright" ~: TestCase $ withPreviewFile $ \path -> do
         image <- right $ prepareKeyImage $ generateImage
             (\x y -> if x < 36 && y < 36 then PixelRGB8 240 10 10 else PixelRGB8 10 20 240) 72 72
@@ -100,6 +150,21 @@ namedIcons =
 
 decode :: KeyImage -> IO (Image PixelRGB8)
 decode image = convertRGB8 <$> right (decodeJpeg (imageBytes image))
+
+upright :: KeyImage -> IO (Image PixelRGB8)
+upright image = do
+    native <- decode image
+    pure (generateImage (\x y -> pixelAt native (71 - x) (71 - y)) 72 72)
+
+visible :: PixelRGB8 -> Bool
+visible (PixelRGB8 red green blue) = max red (max green blue) > 100
+
+bandBounds :: Image PixelRGB8 -> Int -> Int -> IO (Int, Int, Int, Int)
+bandBounds image low high = case [(x, y) | y <- [low..high], x <- [0..71], visible (pixelAt image x y)] of
+    [] -> assertFailure "Expected visible text in line" >> fail "Empty text line"
+    (x, y) : rest -> pure $ foldl'
+        (\(left, top, rightEdge, bottom) (px, py) ->
+            (min left px, min top py, max rightEdge px, max bottom py)) (x, y, x, y) rest
 
 inkBounds :: Image PixelRGB8 -> IO (Int, Int, Int, Int)
 inkBounds image = case

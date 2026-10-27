@@ -5,11 +5,11 @@ module StreamDeck
     , Page (..), PageButton (..), ButtonState (..), Appearance (..)
     , button, statefulButton, state, refreshEvery
     , Action (..), PageId, ButtonId, StateId, KeyChord (..), Modifier (..), super
-    , ClockZone, loadClockZone, loadLocalClockZone, formatClock, clockImage
+    , ClockZone, loadClockZone, loadLocalClockZone, formatClock, clockImage, labeledClockImage
     , Key, keyAt, keyIndex, keyPosition, KeyEvent (..)
     , KeyImage, loadKeyImage, solidColor
     , saveKeyImagePreview
-    , Font, loadFont, Color (..), IconStyle (..), defaultIconStyle, renderGlyph, renderText
+    , Font, loadFont, loadTextFont, Color (..), IconStyle (..), defaultIconStyle, renderGlyph, renderText, renderLabeledText
     ) where
 
 import Control.Monad (forM_, unless)
@@ -17,7 +17,7 @@ import Data.List (nub)
 import qualified DeviceManager as Device
 import StreamDeck.Action
 import StreamDeck.Clock
-import StreamDeck.Font (Font, loadFont, Color (..), IconStyle (..), defaultIconStyle, renderGlyph, renderText)
+import StreamDeck.Font (Font, loadFont, loadTextFont, Color (..), IconStyle (..), defaultIconStyle, renderGlyph, renderText, renderLabeledText)
 import StreamDeck.Image (KeyImage, loadKeyImage, solidColor, saveKeyImagePreview)
 import StreamDeck.Protocol (Key, KeyEvent (..), keyAt, keyIndex, keyPosition)
 import StreamDeck.Pages

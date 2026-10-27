@@ -17,10 +17,13 @@ extra-source-files:
 - examples/FontAwesome.hs
 - examples/Pages.hs
 - fonts/fontawesome/README.md
+- fonts/dejavu/README.md
 
 data-files:
 - fonts/fontawesome/*.ttf
 - fonts/fontawesome/LICENSE.txt
+- fonts/dejavu/DejaVuSans.ttf
+- fonts/dejavu/LICENSE.txt
 
 description:         Please see the README on GitHub at <https://github.com/bendo/haskell-elgato-streamdeck#readme>
 

@@ -95,9 +95,10 @@ cabal exec -- runghc -package=haskell-elgato-streamdeck examples/Pages.hs
 ```
 
 On the main page, `(0,0)` opens the weather page and `(0,4)` opens a commands page.
-The clock at `(0,1)` cycles through local time (green), London (yellow), and Sydney
-(blue). It shows **HHMM** using the bundled font's numeric glyphs and refreshes
-every second. Its selected zone is remembered when you leave and return. City
+The clock at `(0,1)` cycles through Munich (green), London (yellow), and Sydney
+(blue). Each face shows the city name above a larger **HH:MM**, using bundled
+DejaVu Sans, and refreshes every second. Munich uses `Europe/Berlin`; its selected
+city is remembered when you leave and return. City
 buttons print their names; the commands page has a Super+d shortcut and a bell
 button that runs `zenity` to show a "Hello from your Stream Deck!" popup with an
 OK button. This example requires `zenity` for the popup. Other command actions
@@ -205,20 +206,26 @@ selected states run. Renderers run separately from actions and device dispatch;
 they should use cancellation-friendly IO so they can stop on navigation or exit.
 
 ```haskell
+textFont <- loadTextFont
+munich <- loadClockZone "Europe/Berlin"
 london <- loadClockZone "Europe/London"
 sydney <- loadClockZone "Australia/Sydney"
 
-let face zone = refreshEvery 1 $
-        clockImage zone textFont defaultIconStyle "%H:%M"
+let face city zone = refreshEvery 1 $
+        labeledClockImage zone textFont defaultIconStyle city "%H:%M"
 
 -- Use this as a button in a Page:
-let clockButton = statefulButton "clock" clockKey "london"
-        [ state "london" (face london) NextState
-        , state "sydney" (face sydney) NextState
+let clockButton = statefulButton "clock" clockKey "munich"
+        [ state "munich" (face "Munich" munich) NextState
+        , state "london" (face "London" london) NextState
+        , state "sydney" (face "Sydney" sydney) NextState
         ]
 ```
 
-`textFont` is a font loaded with `loadFont` that contains the required text glyphs.
+`loadTextFont` loads the bundled DejaVu Sans text font, including lowercase names
+and punctuation. `labeledClockImage` puts the title above the formatted value;
+`clockImage` renders only the formatted value on one line. You can also supply a
+custom font loaded with `loadFont`.
 Clock formats use `formatTime` syntax, so `%Y-%m-%d` displays a date instead of a
 time. Named zones use the IANA database bundled by the `tz` dependency, including
 daylight-saving rules. `loadLocalClockZone` loads the local Linux zone from `TZ`
@@ -284,11 +291,14 @@ The renderer preserves aspect ratio, centers the glyph outlines, antialiases
 edges, and produces a ready-to-use `KeyImage`. Missing glyphs are reported rather
 than silently drawing a replacement box. Font Awesome Pro glyphs are not included.
 
-For ordinary text or another icon font, use `loadFont` with an explicit `.ttf`
-path, then `renderText font style "Mute"` or `renderGlyph font style character`.
-Text is a single line fitted to the key. Complex-script shaping, multiline layout,
-and automatic font fallback are not implemented. Font Awesome itself is an icon
-font; use a regular text font for arbitrary labels.
+For ordinary text, use the bundled `loadTextFont`, or `loadFont` with an explicit
+`.ttf` path. `renderText font style "Mute"` renders one line;
+`renderLabeledText font style "Munich" "23:20"` renders a smaller title above a
+larger value. The two lines are independently fitted and centered, with numeric
+advances and a shared digit baseline keeping clock values stable as they update.
+`renderGlyph font style character` renders an individual symbol. Complex-script
+shaping, arbitrary multiline layout, and automatic font fallback are not
+implemented. Font Awesome itself remains an icon font.
 
 You can inspect icons without a connected deck by saving upright PNG previews:
 
@@ -301,8 +311,9 @@ The parent directory of the output prefix must exist. In your own code,
 `saveKeyImagePreview "preview.png" image` saves the exact encoded image in its
 upright orientation.
 
-Font files retain their **SIL OFL 1.1** license and attribution in
-`fonts/fontawesome/LICENSE.txt`; see that directory's README for their source.
+Font Awesome files retain their **SIL OFL 1.1** license and attribution in
+`fonts/fontawesome/LICENSE.txt`. DejaVu Sans retains its font license and
+attribution in `fonts/dejavu/LICENSE.txt`. See each directory's README for sources.
 
 - Positions are **zero-based**: rows `0..2`, columns `0..4`, left-to-right and
   top-to-bottom. `keyAt` validates the position.

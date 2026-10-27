@@ -8,7 +8,8 @@ main :: IO ()
 main = do
     hSetBuffering stdout LineBuffering
     fonts <- FA.loadFontAwesome
-    local <- loadLocalClockZone
+    textFont <- loadTextFont
+    munich <- loadClockZone "Europe/Berlin"
     london <- loadClockZone "Europe/London"
     sydney <- loadClockZone "Australia/Sydney"
     weatherKey <- position 0 0
@@ -22,8 +23,8 @@ main = do
     messageKey <- position 0 1
     let icon glyph = either fail pure (FA.renderAwesomeIcon fonts defaultIconStyle glyph)
         label text = either fail pure (renderText (FA.solidFont fonts) defaultIconStyle text)
-        clock zone color = refreshEvery 1 $
-            clockImage zone (FA.solidFont fonts) defaultIconStyle { foreground = color, padding = 4 } "%H%M"
+        clock city zone color = refreshEvery 1 $
+            labeledClockImage zone textFont defaultIconStyle { foreground = color, padding = 4 } city "%H:%M"
     weatherIcon <- icon FA.cloudSun
     commandsIcon <- icon FA.terminal
     backIcon <- icon (FA.AwesomeIcon FA.Solid '\xf060')
@@ -32,20 +33,20 @@ main = do
     sydneyIcon <- label "SYDNEY"
     messageIcon <- icon (FA.AwesomeIcon FA.Solid '\xf0f3')
     putStrLn "Top-left: weather page. Top-right: commands page. Bottom-right arrow: return to main."
-    putStrLn "Clock at (0,1): click to cycle LOCAL (green), LONDON (yellow), SYDNEY (blue)."
-    putStrLn "Clock format is HHMM. Its selected zone is remembered when you return to main."
+    putStrLn "Clock at (0,1): click to cycle Munich (green), London (yellow), Sydney (blue)."
+    putStrLn "Each clock shows the city above HH:MM. Its selected city is remembered when you return to main."
     putStrLn "Command buttons: launcher (Super+d) and bell (message popup via zenity)."
     putStrLn "Ctrl-C exits."
     runPages "main"
         [ Page "main"
             [ button "weather" weatherKey weatherIcon (SwitchPage "weather")
-            , statefulButton "clock" clockKey "local"
-                [ state "local" (clock local (RGB 30 215 96))
+            , statefulButton "clock" clockKey "munich"
+                [ state "munich" (clock "Munich" munich (RGB 30 215 96))
                     (Sequence [NextState, RunIO (putStrLn "Clock: London")])
-                , state "london" (clock london (RGB 255 210 40))
+                , state "london" (clock "London" london (RGB 255 210 40))
                     (Sequence [NextState, RunIO (putStrLn "Clock: Sydney")])
-                , state "sydney" (clock sydney (RGB 60 170 255))
-                    (Sequence [NextState, RunIO (putStrLn "Clock: local")])
+                , state "sydney" (clock "Sydney" sydney (RGB 60 170 255))
+                    (Sequence [NextState, RunIO (putStrLn "Clock: Munich")])
                 ]
             , button "commands" commandsKey commandsIcon (SwitchPage "commands")
             ]

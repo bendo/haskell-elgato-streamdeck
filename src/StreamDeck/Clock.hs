@@ -1,11 +1,11 @@
 -- | Clock appearances using IANA zones, including daylight-saving transitions.
 module StreamDeck.Clock
-    ( ClockZone, loadClockZone, loadLocalClockZone, formatClock, clockImage
+    ( ClockZone, loadClockZone, loadLocalClockZone, formatClock, clockImage, labeledClockImage
     ) where
 
 import Data.Time (UTCTime, defaultTimeLocale, formatTime, getCurrentTime)
 import qualified Data.Time.Zones as TZ
-import StreamDeck.Font (Font, IconStyle, renderText)
+import StreamDeck.Font (Font, IconStyle, renderText, renderLabeledText)
 import StreamDeck.Image (KeyImage)
 
 newtype ClockZone = ClockZone TZ.TZ
@@ -26,3 +26,10 @@ clockImage :: ClockZone -> Font -> IconStyle -> String -> IO KeyImage
 clockImage zone font style patternText = do
     now <- getCurrentTime
     either (ioError . userError) pure (renderText font style (formatClock zone patternText now))
+
+-- | A city/title above a formatted time or date, suitable for refreshEvery.
+labeledClockImage :: ClockZone -> Font -> IconStyle -> String -> String -> IO KeyImage
+labeledClockImage zone font style title patternText = do
+    now <- getCurrentTime
+    either (ioError . userError) pure $
+        renderLabeledText font style title (formatClock zone patternText now)
