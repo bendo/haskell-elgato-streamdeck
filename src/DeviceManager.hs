@@ -10,6 +10,7 @@ module DeviceManager
   , serialNumber
   , firmwareVersion
   , readKeyEvents
+  , flushKeyEvents
   , setKeyImage
   )
 where
@@ -80,14 +81,25 @@ firmwareVersion (Deck device _ _) = Transport.getFeatureReport device 0x05 32
 -- | Wait up to the supplied milliseconds for a report; return transitions only.
 -- A timeout returns no events and preserves the previous state. Reads are serialized.
 readKeyEvents :: Deck -> Int -> IO [KeyEvent]
-readKeyEvents (Deck device state _) timeout
+readKeyEvents deck timeout = maybe [] id <$> readKeyReport deck timeout
+
+-- | Drain reports without dispatching actions, while retaining current key state.
+flushKeyEvents :: Deck -> IO ()
+flushKeyEvents deck = do
+    report <- readKeyReport deck 0
+    case report of
+        Nothing -> pure ()
+        Just _ -> flushKeyEvents deck
+
+readKeyReport :: Deck -> Int -> IO (Maybe [KeyEvent])
+readKeyReport (Deck device state _) timeout
     | timeout < 0 || toInteger timeout > 2147483647 =
         ioError (userError "Read timeout must be within 0..2147483647 milliseconds")
     | otherwise = modifyMVar state $ \previous -> do
         report <- Transport.readTimeout device 19 timeout
-        if BS.null report then pure (previous, []) else do
+        if BS.null report then pure (previous, Nothing) else do
             current <- either (ioError . userError) pure (decodeKeyReport report)
-            pure (current, keyEvents previous current)
+            pure (current, Just (keyEvents previous current))
 
 -- | Send a prepared image. Serialize complete images so their pages cannot interleave.
 setKeyImage :: Deck -> Key -> KeyImage -> IO ()

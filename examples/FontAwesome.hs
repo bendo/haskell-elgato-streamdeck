@@ -21,9 +21,9 @@ main = do
             putStrLn "Font Awesome: Spotify, volume, and weather icons on the first two rows."
             putStrLn "Press a button to print its name. Ctrl-C exits."
             runDeck (map snd buttons)
-        ["--preview", prefix] -> forM_ buttons $ \(name, button) -> do
+        ["--preview", prefix] -> forM_ buttons $ \(name, entry) -> do
             let path = prefix ++ "-" ++ name ++ ".png"
-            saveKeyImagePreview path (buttonImage button)
+            saveKeyImagePreview path (buttonImage entry)
             putStrLn path
         _ -> fail "Usage: FontAwesome.hs [--preview OUTPUT_PREFIX]"
 

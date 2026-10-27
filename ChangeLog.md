@@ -2,6 +2,20 @@
 
 ## Unreleased changes
 
+- Replace the external `xdotool` keyboard action with a native X11/XTest backend.
+- Resolve keysyms in the active keyboard layout, serialize complete chords, and
+  restore held keys, modifier locks/latches, and keyboard groups after injection.
+- Validate key mappings before generating input, provide explicit display/XTest
+  errors, and test native keyboard events in an opt-in private Xvfb server.
+- Add declarative pages and typed page-switch, command, shell, key-chord, custom IO,
+  state-selection, and sequence actions.
+- Remember named button states per page for the running session; navigation has
+  fully user-defined button images, positions, and destinations.
+- Add background appearance refresh, render caching/deduplication, cancellation,
+  stale-input/result handling, and blanking of unused page keys.
+- Add IANA-zone clock images and a complete pages/cycling-clock example.
+- Test page validation, state persistence, effect responsiveness, transitions,
+  renderer lifecycle, key chords, and daylight-saving behavior without hardware.
 - Add styled TrueType glyph and single-line text rendering with automatic fitting,
   centering, antialiasing, colors, padding, and missing-glyph errors.
 - Bundle Font Awesome Free 6.7.2 solid, regular, and brand fonts with their SIL OFL

@@ -12,6 +12,8 @@ import Data.Either (isLeft)
 import Data.Word (Word8)
 import DeviceManager (withHIDAPI)
 import qualified FontSpec
+import qualified KeyboardSpec
+import qualified PageSpec
 import StreamDeck (Button (..), runDeck, solidColor)
 import StreamDeck.Image (imageBytes, prepareKeyImage)
 import StreamDeck.Protocol
@@ -25,12 +27,14 @@ import Test.HUnit
 
 main :: IO ()
 main = do
-    result <- runTestTT tests
+    keyboardTests <- KeyboardSpec.tests
+    result <- runTestTT (TestList [tests, keyboardTests])
     if errors result + failures result == 0 then pure () else exitFailure
 
 tests :: Test
 tests = TestList
     [ FontSpec.tests
+    , PageSpec.tests
     , "key positions" ~: TestCase $ do
         forM_ [(row, column) | row <- [0..2], column <- [0..4]] $ \position@(row, column) -> do
             key <- right (keyAt row column)

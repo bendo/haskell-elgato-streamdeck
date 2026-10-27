@@ -25,6 +25,7 @@ extra-source-files:
     examples/MyDeck.hs
     examples/Radio.hs
     examples/FontAwesome.hs
+    examples/Pages.hs
     fonts/fontawesome/README.md
 data-files:
     fonts/fontawesome/fa-brands-400.ttf
@@ -40,9 +41,14 @@ library
   exposed-modules:
       DeviceManager
       StreamDeck
+      StreamDeck.Action
+      StreamDeck.Clock
       StreamDeck.Font
       StreamDeck.FontAwesome
       StreamDeck.Image
+      StreamDeck.Keyboard.X11
+      StreamDeck.Pages
+      StreamDeck.Pages.Runtime
       StreamDeck.Protocol
       StreamDeck.Runtime
       StreamDeck.Transport
@@ -51,8 +57,15 @@ library
   hs-source-dirs:
       src
   ghc-options: -Wall -Wcompat
+  cc-options: -pthread
   c-sources:
       cbits/read_timeout.c
+      cbits/x11_keyboard.c
+  extra-libraries:
+      pthread
+  pkgconfig-depends:
+      x11 >= 1.6
+    , xtst >= 1.2
   build-depends:
       FontyFruity >=0.5.3.5 && <0.6
     , JuicyPixels ==3.3.*
@@ -60,7 +73,12 @@ library
     , async ==2.2.*
     , base >=4.20 && <5
     , bytestring >=0.11 && <0.13
+    , containers >=0.6 && <0.8
     , hidapi >=0.1.8 && <0.2
+    , process ==1.6.*
+    , stm ==2.5.*
+    , time >=1.12 && <1.15
+    , tz >=0.1.3.6 && <0.2
     , vector ==0.13.*
   default-language: Haskell2010
 
@@ -82,17 +100,27 @@ test-suite haskell-elgato-streamdeck-test
   main-is: Spec.hs
   other-modules:
       FontSpec
+      KeyboardSpec
+      PageSpec
       Paths_haskell_elgato_streamdeck
   hs-source-dirs:
       test
   ghc-options: -Wall -Wcompat -threaded -rtsopts -with-rtsopts=-N
+  c-sources:
+      test/cbits/x11_fixture.c
+  pkgconfig-depends:
+      x11 >= 1.6
+    , xtst >= 1.2
   build-depends:
       HUnit ==1.6.*
     , JuicyPixels ==3.3.*
     , async ==2.2.*
     , base >=4.20 && <5
     , bytestring >=0.11 && <0.13
+    , containers >=0.6 && <0.8
     , directory ==1.3.*
     , haskell-elgato-streamdeck
     , hidapi >=0.1.8 && <0.2
+    , stm ==2.5.*
+    , time >=1.12 && <1.15
   default-language: Haskell2010

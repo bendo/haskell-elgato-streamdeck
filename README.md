@@ -1,19 +1,27 @@
 # haskell-elgato-streamdeck
 
 A Haskell library for small, single-file **Stream Deck MK2** applications.
-Configure key images and ordinary Haskell `IO` actions. The library handles device
-discovery, image conversion, button events, and cleanup.
+Configure key images, typed actions, pages, and stateful buttons with scheduled
+appearances. The library handles discovery, image conversion, button events,
+rendering, and cleanup.
 
 ## Build and run
 
 The project uses **Stack LTS 24.65 / GHC 9.10.3**. Stack selects the project compiler
 independently of your default GHC.
 
-On Linux, the `hidapi` Haskell package builds its bundled HIDAPI C implementation
-and requires a C compiler and libudev development headers. For Debian/Ubuntu:
+On Linux, the `hidapi` Haskell package builds its bundled HIDAPI C implementation.
+The native keyboard backend links to X11 and XTest. Install a C compiler, libudev,
+X11/XTest development headers, and pkg-config. For Debian/Ubuntu:
 
 ```sh
-sudo apt install build-essential libudev-dev
+sudo apt install build-essential pkg-config libudev-dev libx11-dev libxtst-dev
+```
+
+On Arch Linux:
+
+```sh
+sudo pacman -S --needed base-devel pkgconf systemd libx11 libxtst
 ```
 
 Build and run the discovery example:
@@ -76,6 +84,153 @@ cabal exec -- runghc -package=haskell-elgato-streamdeck examples/Radio.hs
 ```
 
 JPEG files work directly; no PNG conversion is necessary.
+
+## Pages, actions, and remembered button states
+
+Run the complete page example:
+
+```sh
+cabal build all
+cabal exec -- runghc -package=haskell-elgato-streamdeck examples/Pages.hs
+```
+
+On the main page, `(0,0)` opens the weather page and `(0,4)` opens a commands page.
+The clock at `(0,1)` cycles through local time (green), London (yellow), and Sydney
+(blue). It shows **HHMM** using the bundled font's numeric glyphs and refreshes
+every second. Its selected zone is remembered when you leave and return. City
+buttons print their names; the commands page has a Super+d shortcut and a bell
+button that runs `zenity` to show a "Hello from your Stream Deck!" popup with an
+OK button. This example requires `zenity` for the popup. Other command actions
+wait until you close the dialog; page navigation and clock updates stay responsive.
+Press Ctrl-C to exit.
+
+### Define a page
+
+`runPages` takes an initial page ID and your page definitions. For example, after
+preparing your key positions and images:
+
+```haskell
+runPages "main"
+    [ Page "main"
+        [ button "weather" weatherKey weatherImage (SwitchPage "weather") ]
+    , Page "weather"
+        [ button "london" londonKey londonImage
+            (RunIO (putStrLn "Weather city: London"))
+        , button "back" backKey backImage (SwitchPage "main")
+        ]
+    ]
+```
+
+The back button is entirely yours: choose its position, an image or rendered font
+icon/text, and its destination. No keys, icons, or navigation behavior are reserved.
+
+`runPages` owns the full 15-key layout and draws unused keys black. It validates
+page IDs, button IDs, positions, state IDs, destinations, and refresh intervals
+before opening a device. Button IDs must be unique within a page; state IDs must
+be unique within a button. The original `runDeck [Button ...]` API is also available
+for simple single-page `IO` applications.
+
+### Choose actions
+
+| Action | Behavior |
+| --- | --- |
+| `SwitchPage "weather"` | Display a configured page |
+| `Execute "xset" ["s", "off", "-dpms"]` | Execute a program with literal arguments |
+| `Shell "command1 && command2"` | Execute an explicit shell command |
+| `SendKeys (super 'd')` | Send a native X11/XTest key chord |
+| `RunIO operation` | Run your own Haskell `IO ()` |
+| `NextState` | Advance this button's state, wrapping to the first |
+| `SetState "london"` | Select a named state of this button |
+| `Sequence [action1, action2]` | Apply UI actions and enqueue external effects in list order |
+
+`Execute`, `Shell`, `SendKeys`, and `RunIO` run sequentially on a separate worker.
+Navigation, state changes, and display refreshes remain responsive during a slow
+command. An action already accepted stays queued/running even if you change pages.
+Synchronous effect failures are logged and the worker continues with later actions.
+
+`Sequence` does **not** wait for external effects before applying its later UI
+actions. For example, `Sequence [Execute "program" [], SwitchPage "main"]` queues
+the program and switches pages immediately. Use one `RunIO` operation when you
+need several external operations to wait for each other. `NextState` and `SetState`
+always refer to the button that initiated the sequence, including after a
+`SwitchPage` in that sequence.
+
+Keyboard chords use X11 keysym names:
+
+```haskell
+SendKeys (super 'd')
+SendKeys (KeyChord [Control, Alt] "Delete")
+SendKeys (KeyChord [] "XF86AudioRaiseVolume")
+```
+
+`SendKeys` calls X11's XTest extension directly; it needs no `xdotool` executable.
+Set `DISPLAY` for the X11 session. The backend validates all keys before sending
+input, presses modifiers before the target, and releases injected keys in reverse
+order. It temporarily clears held/latched/locked modifiers and restores their
+state and the active keyboard group afterward, including during cancellation.
+Complete chords are serialized across callers.
+
+Key names are resolved at base/Shift levels in the active keyboard group. An
+explicit shifted symbol such as `exclam` adds Shift automatically; an explicit
+modifier such as `KeyChord [Super, Shift] "d"` also works. Unknown or unmapped
+keys report an error before generating events. An already-held target key is
+rejected so its physical key state is not altered.
+
+This is an X11 backend, suitable for XMonad and other X11 desktops. Under Wayland,
+XTest can target XWayland applications but does not provide compositor-wide
+shortcuts. A native Wayland backend can be added separately.
+
+### Give a button multiple states
+
+Every state has its own appearance and action. This three-state button cycles
+between images in declaration order:
+
+```haskell
+statefulButton "mode" modeKey "one"
+    [ state "one"   (Static firstImage)  NextState
+    , state "two"   (Static secondImage) NextState
+    , state "three" (Static thirdImage)  NextState
+    ]
+```
+
+Selections are remembered by **(page ID, button ID)** throughout the running
+session. Leaving a page pauses its renderers; returning restores each button's
+selected state. Restarting the application restores the configured initial states.
+
+### Refresh a clock or other dynamic appearance
+
+`refreshEvery seconds renderer` runs the renderer immediately on activation, then
+waits the given number of seconds after each completed attempt. Only visible,
+selected states run. Renderers run separately from actions and device dispatch;
+they should use cancellation-friendly IO so they can stop on navigation or exit.
+
+```haskell
+london <- loadClockZone "Europe/London"
+sydney <- loadClockZone "Australia/Sydney"
+
+let face zone = refreshEvery 1 $
+        clockImage zone textFont defaultIconStyle "%H:%M"
+
+-- Use this as a button in a Page:
+let clockButton = statefulButton "clock" clockKey "london"
+        [ state "london" (face london) NextState
+        , state "sydney" (face sydney) NextState
+        ]
+```
+
+`textFont` is a font loaded with `loadFont` that contains the required text glyphs.
+Clock formats use `formatTime` syntax, so `%Y-%m-%d` displays a date instead of a
+time. Named zones use the IANA database bundled by the `tz` dependency, including
+daylight-saving rules. `loadLocalClockZone` loads the local Linux zone from `TZ`
+or `/etc/localtime` once at startup.
+
+A renderer is any `IO KeyImage`, so it can also read weather data, audio state,
+or another application. Identical JPEGs are not resent. After a rendering error,
+the last good image remains and the renderer retries at its next interval. A
+new dynamic state is blank until its first result, or shows its cached image if
+it has been displayed before. Input from a layout transition and results from
+obsolete renderers are discarded; held keys must be released before a fresh press
+can activate the new layout.
 
 ## Font Awesome icons and text
 
@@ -209,8 +364,27 @@ stack test
 The tests run without hardware and cover key positions and transitions, malformed
 reports, JPEG sizing/orientation, image packet boundaries, duplicate bindings,
 action ordering, error recovery, worker cancellation, bundled font glyphs, font
-colors/centering/padding, missing glyphs, labels, and PNG previews. Use the
-diagnostics and examples above for live hardware checks.
+colors/centering/padding, missing glyphs, labels, PNG previews, page validation,
+remembered states, redraw/blanking, transition input, background effects,
+renderer lifecycle/deduplication, and clock daylight-saving rules. Page tests use
+an injected device backend; no physical deck or keyboard injection is required.
+Use the diagnostics and examples above for live hardware checks.
+
+Native keyboard event tests are opt-in and use a private Xvfb server, not your
+desktop. Install Xvfb and xauth to run them (`setxkbmap` enables the additional
+multi-layout check):
+
+```sh
+STREAMDECK_TEST_X11=1 xvfb-run -a cabal test all --test-show-details=direct
+```
+
+They check actual event order, modifier/lock restoration, shifted symbols, invalid
+and unmapped keys, concurrent chords, cancellation, and active layouts. To check
+the missing-XTest error path on a separate server:
+
+```sh
+STREAMDECK_TEST_X11=no-xtest xvfb-run -a -s "-screen 0 800x600x24 -extension XTEST" cabal test all --test-show-details=direct
+```
 
 Native I/O uses a small local wrapper around the C implementation bundled by
 `hidapi`. This avoids the binding's incorrect freeing of HIDAPI-owned error
@@ -220,5 +394,5 @@ regression test exercises error handling and closing without a physical deck.
 
 The MK2 packet format is cross-checked against the
 [python-elgato-streamdeck Original V2 implementation](https://github.com/abcminiuser/python-elgato-streamdeck/blob/master/src/StreamDeck/Devices/StreamDeckOriginalV2.py),
-which also handles the MK2. Other deck models, automatic reconnection, and pages
-are not implemented yet.
+which also handles the MK2. Other deck models and automatic reconnection are not
+implemented yet.

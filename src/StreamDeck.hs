@@ -1,6 +1,11 @@
 -- | A small single-file application API for the Stream Deck MK2.
 module StreamDeck
     ( Button (..), runDeck
+    , runPages
+    , Page (..), PageButton (..), ButtonState (..), Appearance (..)
+    , button, statefulButton, state, refreshEvery
+    , Action (..), PageId, ButtonId, StateId, KeyChord (..), Modifier (..), super
+    , ClockZone, loadClockZone, loadLocalClockZone, formatClock, clockImage
     , Key, keyAt, keyIndex, keyPosition, KeyEvent (..)
     , KeyImage, loadKeyImage, solidColor
     , saveKeyImagePreview
@@ -10,9 +15,13 @@ module StreamDeck
 import Control.Monad (forM_, unless)
 import Data.List (nub)
 import qualified DeviceManager as Device
+import StreamDeck.Action
+import StreamDeck.Clock
 import StreamDeck.Font (Font, loadFont, Color (..), IconStyle (..), defaultIconStyle, renderGlyph, renderText)
 import StreamDeck.Image (KeyImage, loadKeyImage, solidColor, saveKeyImagePreview)
 import StreamDeck.Protocol (Key, KeyEvent (..), keyAt, keyIndex, keyPosition)
+import StreamDeck.Pages
+import StreamDeck.Pages.Runtime (PageDriver (..), runPageRuntime)
 import StreamDeck.Runtime (runEventLoop)
 
 data Button = Button
@@ -35,7 +44,21 @@ runDeck buttons = do
         case devices of
             [] -> ioError (userError "No Stream Deck MK2 found")
             device : _ -> Device.withDevice device $ \deck -> do
-                forM_ buttons $ \button ->
-                    Device.setKeyImage deck (buttonKey button) (buttonImage button)
+                forM_ buttons $ \entry ->
+                    Device.setKeyImage deck (buttonKey entry) (buttonImage entry)
                 runEventLoop (Device.readKeyEvents deck 100)
-                    [(buttonKey button, onPress button) | button <- buttons]
+                    [(buttonKey entry, onPress entry) | entry <- buttons]
+
+-- | Run validated pages, remembering each button's selected state for this session.
+-- All 15 keys belong to the page layout; unconfigured keys are drawn black.
+runPages :: PageId -> [Page] -> IO ()
+runPages first pages = do
+    config <- either (ioError . userError) pure (compilePages first pages)
+    Device.withHIDAPI $ do
+        devices <- Device.enumerate
+        case devices of
+            [] -> ioError (userError "No Stream Deck MK2 found")
+            device : _ -> Device.withDevice device $ \deck ->
+                runPageRuntime
+                    (PageDriver (Device.readKeyEvents deck 100) (Device.flushKeyEvents deck) (Device.setKeyImage deck))
+                    (const (pure ())) config
