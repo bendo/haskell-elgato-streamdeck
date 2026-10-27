@@ -5,13 +5,14 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (link, withAsync)
 import Control.Concurrent.MVar (newMVar, withMVar)
 import Control.Concurrent.STM
-    ( TQueue, atomically, newTQueueIO, newTVarIO, readTQueue, readTVarIO, writeTQueue, writeTVar )
+    ( TQueue, TVar, atomically, check, modifyTVar', newTQueueIO, newTVarIO
+    , readTQueue, readTVar, readTVarIO, registerDelay, writeTQueue, writeTVar )
 import Control.Exception (SomeAsyncException, SomeException, evaluate, fromException, throwIO, try)
-import Control.Monad (foldM, forever, when)
+import Control.Monad (forM, forever, unless, when)
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import StreamDeck.Action (performEffect)
-import StreamDeck.Image (KeyImage, imageBytes, solidColor)
+import StreamDeck.Image (KeyImage, imageBytes, prepareImageReports, solidColor)
 import StreamDeck.Pages
 import StreamDeck.Protocol (Key, KeyEvent (..), keyAt)
 import System.IO (hPutStrLn, stderr)
@@ -20,12 +21,18 @@ data PageDriver = PageDriver
     { pollPageEvents :: IO [KeyEvent]
     -- | Drain pending reports, preserving held/released key tracking.
     , flushPageEvents :: IO ()
-    , drawPageKey :: Key -> KeyImage -> IO ()
+    -- | Send all changed keys as one uninterrupted burst. The runtime pauses
+    -- polling for this entire callback, not separately for each key/packet.
+    , drawPageFrame :: [(Key, KeyImage)] -> IO ()
     }
 
 type CacheKey = (String, String, String)
 type Frame = Map.Map Key BS.ByteString
 type RenderCache = Map.Map CacheKey KeyImage
+type InitialResults = TVar (Map.Map CacheKey (Either String KeyImage))
+
+blankImage :: KeyImage
+blankImage = solidColor 0 0 0
 
 data Event
     = Input Integer [KeyEvent]
@@ -53,22 +60,41 @@ runPageRuntime driver observe config = do
         serve generation model previous cached = do
             atomically (writeTVar gate (generation, False))
             let visible = visibleButtons config model
-            frame <- paint driver visible model previous cached
-            -- No read can straddle this flush and activation. Old packets cannot
-            -- become a fresh press on a newly displayed layout.
-            withMVar inputLock $ \_ -> do
-                flushPageEvents driver
-                atomically (writeTVar gate (generation, True))
-                observe model
-            (next, nextFrame, nextCache) <- withRenderers events generation model visible $
-                receive generation model frame cached
+                dynamicCount = length [() | (_, view) <- visible, RefreshEvery _ _ <- [stateAppearance view]]
+            initial <- newTVarIO Map.empty
+            publish <- newTVarIO False
+            -- One deadline for the entire page, including renderer startup and
+            -- static preparation. Slow jobs continue after the first transfer.
+            expired <- if dynamicCount == 0 then newTVarIO True else registerDelay 50000
+            (next, nextFrame, nextCache) <- withRenderers events initial publish generation model visible $ do
+                mapM_ (\(entry, view) -> case stateAppearance view of
+                    Static image -> prepareImageReports (pageButtonKey entry) image >> pure ()
+                    RefreshEvery _ _ -> pure ()) visible
+                fresh <- atomically $ do
+                    results <- readTVar initial
+                    deadline <- readTVar expired
+                    check (deadline || Map.size results == dynamicCount)
+                    -- This atomic handoff prevents a result that arrives during
+                    -- frame transfer from being lost until its next interval.
+                    writeTVar publish True
+                    pure (Map.mapMaybe (either (const Nothing) Just) results)
+                let preparedCache = Map.union fresh cached
+                (changes, frame) <- prepareFrame visible model previous preparedCache
+                -- Exclude reads for the complete transfer and input flush.
+                withMVar inputLock $ \_ -> do
+                    unless (null changes) (drawPageFrame driver changes)
+                    flushPageEvents driver
+                    atomically (writeTVar gate (generation, True))
+                    observe model
+                receive generation model frame preparedCache
             serve (generation + 1) next nextFrame nextCache
         receive generation model frame cached = do
             event <- atomically (readTQueue events)
             case event of
                 Input stamp changes | stamp == generation -> dispatch changes
                 Rendered stamp cacheKey key image | stamp == generation -> do
-                    updated <- drawChanged driver frame key image
+                    updated <- drawChanged
+                        (\changes -> withMVar inputLock (\_ -> drawPageFrame driver changes)) frame key image
                     receive generation model updated (Map.insert cacheKey image cached)
                 RenderFailed stamp message | stamp == generation -> do
                     hPutStrLn stderr ("Stream Deck appearance failed: " ++ message)
@@ -91,42 +117,59 @@ runPageRuntime driver observe config = do
         link worker
         serve 0 (initialDeckState config) Map.empty Map.empty
 
-paint :: PageDriver -> [(PageButton, ButtonState)] -> DeckState -> Frame -> RenderCache -> IO Frame
-paint driver visible model previous cached = foldM draw previous allKeys
+-- JPEGs and cached packet streams are forced before any hardware update starts.
+prepareFrame :: [(PageButton, ButtonState)] -> DeckState -> Frame -> RenderCache -> IO ([(Key, KeyImage)], Frame)
+prepareFrame visible model previous cached = do
+    planned <- forM allKeys $ \key -> do
+        let image = Map.findWithDefault blankImage key images
+            bytes = imageBytes image
+        _ <- evaluate (BS.length bytes)
+        let changed = Map.lookup key previous /= Just bytes
+        when changed (prepareImageReports key image >> pure ())
+        pure (key, image, bytes, changed)
+    pure ([(key, image) | (key, image, _, True) <- planned],
+          Map.fromList [(key, bytes) | (key, _, bytes, _) <- planned])
   where
-    blank = solidColor 0 0 0
     images = Map.fromList
         [ (pageButtonKey entry, case stateAppearance view of
                 Static image -> image
-                RefreshEvery _ _ -> Map.findWithDefault blank (reference model entry view) cached)
+                RefreshEvery _ _ -> Map.findWithDefault blankImage (reference model entry view) cached)
         | (entry, view) <- visible ]
-    draw frame key = drawChanged driver frame key (Map.findWithDefault blank key images)
     allKeys = [key | row <- [0..2], column <- [0..4], Right key <- [keyAt row column]]
 
-drawChanged :: PageDriver -> Frame -> Key -> KeyImage -> IO Frame
-drawChanged driver frame key image = do
+drawChanged :: ([(Key, KeyImage)] -> IO ()) -> Frame -> Key -> KeyImage -> IO Frame
+drawChanged present frame key image = do
     let bytes = imageBytes image
     if Map.lookup key frame == Just bytes then pure frame else do
-        drawPageKey driver key image
+        _ <- prepareImageReports key image
+        present [(key, image)]
         pure (Map.insert key bytes frame)
 
-withRenderers :: TQueue Event -> Integer -> DeckState -> [(PageButton, ButtonState)] -> IO a -> IO a
-withRenderers events generation model visible use = launch jobs
+withRenderers :: TQueue Event -> InitialResults -> TVar Bool -> Integer -> DeckState -> [(PageButton, ButtonState)] -> IO a -> IO a
+withRenderers events initial publish generation model visible use = launch jobs
   where
     jobs =
         [ forever $ do
             outcome <- attempt $ do
                 image <- render
-                _ <- evaluate (BS.length (imageBytes image))
+                _ <- prepareImageReports (pageButtonKey entry) image
                 pure image
-            atomically $ writeTQueue events $ case outcome of
-                Left err -> RenderFailed generation (show err)
-                Right image -> Rendered generation (reference model entry view) (pageButtonKey entry) image
+            atomically $ do
+                live <- readTVar publish
+                let cacheKey = reference model entry view
+                case outcome of
+                    Left err -> do
+                        unless live $ modifyTVar' initial (Map.insertWith keepGood cacheKey (Left (show err)))
+                        writeTQueue events (RenderFailed generation (show err))
+                    Right image -> if live
+                        then writeTQueue events (Rendered generation cacheKey (pageButtonKey entry) image)
+                        else modifyTVar' initial (Map.insert cacheKey (Right image))
             threadDelay (max 1 (ceiling (toRational seconds * 1000000)))
         | (entry, view) <- visible
         , RefreshEvery seconds render <- [stateAppearance view] ]
     launch [] = use
     launch (job : rest) = withAsync job $ \worker -> link worker >> launch rest
+    keepGood latest old = case old of Right _ -> old; Left _ -> latest
 
 reference :: DeckState -> PageButton -> ButtonState -> CacheKey
 reference model entry view = (currentPage model, pageButtonId entry, stateId view)

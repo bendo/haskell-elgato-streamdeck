@@ -11,6 +11,7 @@ import qualified Data.ByteString as BS
 import Data.Either (isLeft)
 import Data.Word (Word8)
 import DeviceManager (withHIDAPI)
+import qualified BatchSpec
 import qualified FontSpec
 import qualified KeyboardSpec
 import qualified PageSpec
@@ -33,7 +34,8 @@ main = do
 
 tests :: Test
 tests = TestList
-    [ FontSpec.tests
+    [ BatchSpec.tests
+    , FontSpec.tests
     , PageSpec.tests
     , "key positions" ~: TestCase $ do
         forM_ [(row, column) | row <- [0..2], column <- [0..4]] $ \position@(row, column) -> do

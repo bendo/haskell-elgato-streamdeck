@@ -60,5 +60,5 @@ runPages first pages = do
             [] -> ioError (userError "No Stream Deck MK2 found")
             device : _ -> Device.withDevice device $ \deck ->
                 runPageRuntime
-                    (PageDriver (Device.readKeyEvents deck 100) (Device.flushKeyEvents deck) (Device.setKeyImage deck))
+                    (PageDriver (Device.readKeyEvents deck 20) (Device.flushKeyEvents deck) (Device.setKeyImages deck))
                     (const (pure ())) config

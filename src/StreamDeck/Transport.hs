@@ -4,7 +4,7 @@
 -- hidapi-0.1.8's Haskell error wrapper incorrectly frees hid_error's borrowed
 -- string. Keep native handles here and copy error messages without freeing them.
 module StreamDeck.Transport
-    ( Device, openPath, close, readTimeout, write, getFeatureReport
+    ( Device, openPath, close, readTimeout, write, writeMany, getFeatureReport
     ) where
 
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
@@ -16,6 +16,7 @@ import Foreign (Ptr, allocaBytes, castPtr, nullPtr, pokeByteOff)
 import Foreign.C.String (CString, CWString, peekCWString, withCString)
 import Foreign.C.Types (CInt (..), CSize (..))
 import System.HIDAPI (HIDAPIException (..))
+import StreamDeck.Internal.Batch (writeBatch)
 
 data NativeDevice
 data Device = Device (Ptr NativeDevice) (MVar ())
@@ -63,6 +64,16 @@ write (Device pointer lock) bytes = do
         count <- nativeWrite pointer (castPtr buffer) (fromIntegral size)
         checkCount pointer "Write failed" size count
         pure (fromIntegral count)
+
+-- | Send a complete prepared burst while owning the native device lock once.
+-- A short write aborts the burst, releasing the lock through withMVar cleanup.
+writeMany :: Device -> [BS.ByteString] -> IO ()
+writeMany (Device pointer lock) = writeBatch lock $ \bytes ->
+    BS.useAsCStringLen bytes $ \(buffer, size) -> do
+        count <- nativeWrite pointer (castPtr buffer) (fromIntegral size)
+        checkCount pointer "Write failed" size count
+        unless (fromIntegral count == size) $
+            throwIO (HIDAPIException "Write failed" "Incomplete HID report write")
 
 -- | Length includes the report ID, as in the native HIDAPI API.
 getFeatureReport :: Device -> Word8 -> Int -> IO (Word8, BS.ByteString)

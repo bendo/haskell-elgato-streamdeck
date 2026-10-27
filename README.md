@@ -131,6 +131,13 @@ before opening a device. Button IDs must be unique within a page; state IDs must
 be unique within a button. The original `runDeck [Button ...]` API is also available
 for simple single-page `IO` applications.
 
+Page transitions prepare the full desired frame in memory before writing any
+keys: JPEG encoding and USB packet preparation are complete before transfer.
+Prepared packet streams are cached per image/key. Only changed keys are sent,
+as one uninterrupted burst under the device I/O lock, while input polling is
+paused. Input resumes after draining transition reports. The MK2 protocol still
+updates individual keys; this is a fast burst, not a hardware-atomic page swap.
+
 ### Choose actions
 
 | Action | Behavior |
@@ -232,12 +239,18 @@ daylight-saving rules. `loadLocalClockZone` loads the local Linux zone from `TZ`
 or `/etc/localtime` once at startup.
 
 A renderer is any `IO KeyImage`, so it can also read weather data, audio state,
-or another application. Identical JPEGs are not resent. After a rendering error,
-the last good image remains and the renderer retries at its next interval. A
-new dynamic state is blank until its first result, or shows its cached image if
-it has been displayed before. Input from a layout transition and results from
-obsolete renderers are discarded; held keys must be released before a fresh press
-can activate the new layout.
+or another application. On a page/state transition, all visible renderers start
+concurrently and share one **50 ms initial-render budget**, rather than waiting
+50 ms per button. Fast results, including clocks, join the first frame. Slower
+renderers use their last cached image, or a black placeholder on the first visit,
+and update when ready. The renderer keeps running after the deadline; a result
+arriving during the frame transfer is retained for a later update.
+
+Identical JPEGs are not resent. After a rendering error, the last good image
+remains and the renderer retries at its next interval. Dynamic caches retain the
+latest image per configured state, not every historical clock/weather image.
+Input from a layout transition and results from obsolete renderers are discarded;
+held keys must be released before a fresh press can activate the new layout.
 
 ## Font Awesome icons and text
 
@@ -380,6 +393,33 @@ remembered states, redraw/blanking, transition input, background effects,
 renderer lifecycle/deduplication, and clock daylight-saving rules. Page tests use
 an injected device backend; no physical deck or keyboard injection is required.
 Use the diagnostics and examples above for live hardware checks.
+
+### Page-transfer benchmark
+
+```sh
+cabal run streamdeck-page-benchmark
+```
+
+This fills all 15 keys with test icons, then switches between two test pages using
+scripted presses. Avoid physical key presses while it runs. It reports cold
+render/encode/packet preparation, warm cached preparation, batch transfer with
+and without competing input reads, and end-to-end runtime transition timing.
+The runtime timings separate input/preparation/handoff from the uninterrupted
+device burst and the final flush/activation. Individual transfer timings include
+any wait for the native I/O lock; they are host-side timings, not measurements of
+the panel's physical refresh. Restart your normal example afterward to restore
+its layout.
+
+On the development MK2, a prepared 15-key/45-report upload previously took
+4.51–4.52 seconds with a competing 100 ms input poll (5.7 ms without a reader).
+After batching, the runtime's 15-key page switches measured 45.9–47.1 ms end to
+end, including input handling and flushing; their uninterrupted device bursts
+took 5.8–6.9 ms. These are sample host-side measurements, not universal latency
+guarantees. Warm cached packet preparation measured about 0.005 ms per frame.
+
+For a custom `StreamDeck.Pages.Runtime.PageDriver`, implement `drawPageFrame`
+as a batch callback. The native implementation uses `DeviceManager.setKeyImages`.
+`setKeyImage` uses the same transport burst mechanism for a one-key update.
 
 Native keyboard event tests are opt-in and use a private Xvfb server, not your
 desktop. Install Xvfb and xauth to run them (`setxkbmap` enables the additional

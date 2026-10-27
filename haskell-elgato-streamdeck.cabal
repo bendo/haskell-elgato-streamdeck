@@ -49,6 +49,7 @@ library
       StreamDeck.Font
       StreamDeck.FontAwesome
       StreamDeck.Image
+      StreamDeck.Internal.Batch
       StreamDeck.Keyboard.X11
       StreamDeck.Pages
       StreamDeck.Pages.Runtime
@@ -98,10 +99,26 @@ executable haskell-elgato-streamdeck-exe
     , hidapi >=0.1.8 && <0.2
   default-language: Haskell2010
 
+executable streamdeck-page-benchmark
+  main-is: PageSwitch.hs
+  other-modules:
+      Paths_haskell_elgato_streamdeck
+  hs-source-dirs:
+      benchmarks
+  ghc-options: -Wall -Wcompat -threaded -rtsopts
+  build-depends:
+      async ==2.2.*
+    , base >=4.20 && <5
+    , bytestring >=0.11 && <0.13
+    , haskell-elgato-streamdeck
+    , stm ==2.5.*
+  default-language: Haskell2010
+
 test-suite haskell-elgato-streamdeck-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      BatchSpec
       FontSpec
       KeyboardSpec
       PageSpec

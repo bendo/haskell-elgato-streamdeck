@@ -1,17 +1,18 @@
 module PageSpec (tests) where
 
-import Control.Concurrent (newEmptyMVar, putMVar, takeMVar, tryTakeMVar)
+import Control.Concurrent (newEmptyMVar, putMVar, readMVar, takeMVar, tryTakeMVar)
 import Control.Concurrent.Async (link, withAsync)
 import Control.Concurrent.STM
     ( TQueue, TVar, atomically, check, modifyTVar', newTQueueIO, newTVarIO
     , orElse, readTQueue, readTVar, readTVarIO, registerDelay, tryReadTQueue, writeTQueue )
-import Control.Exception (IOException, finally, try)
+import Control.Exception (IOException, SomeException, finally, try)
 import Control.Monad (forM_, unless, when)
 import qualified Data.ByteString as BS
 import Data.Either (isLeft)
 import Data.IORef (atomicModifyIORef', newIORef, readIORef)
 import qualified Data.Map.Strict as Map
 import Data.Time (UTCTime (..), fromGregorian, secondsToDiffTime)
+import GHC.Clock (getMonotonicTimeNSec)
 import StreamDeck (runPages)
 import StreamDeck.Action
 import StreamDeck.Clock
@@ -63,12 +64,16 @@ tests = TestList
             assertEqual "initial page" "main" (currentPage initial)
             assertEqual "all 15 keys initialized" 15 . Map.size =<< readTVarIO (screen harness)
             assertImage harness k0 red
+            initialBatches <- readTVarIO (batches harness)
+            assertEqual "one initial frame callback" [15] (map length initialBatches)
             press harness k1
             weather <- ready harness
             assertEqual "navigated" "weather" (currentPage weather)
             assertImage harness k1 black
             assertImage harness k0 yellow
             assertImage harness k14 blue
+            pageBatches <- readTVarIO (batches harness)
+            assertEqual "one batch containing only changed keys" [15, 3] (map length pageBatches)
             press harness k14
             _ <- ready harness
             assertImage harness k0 red
@@ -163,10 +168,10 @@ tests = TestList
         triggered <- newIORef False
         barrier <- newEmptyMVar
         let base = driver harness
-            backend = base { drawPageKey = \key image -> do
-                when (key == k2 && imageBytes image == imageBytes blue) $
+            backend = base { drawPageFrame = \images -> do
+                when (any (\(key, image) -> key == k2 && imageBytes image == imageBytes blue) images) $
                     putMVar painting () >> takeMVar release
-                drawPageKey base key image }
+                drawPageFrame base images }
             pages = [Page "main" [button "next" k0 red (SwitchPage "other")],
                      Page "other" [button "city" k1 green (RunIO (atomicModifyIORef' triggered (\_ -> (True, ())))),
                                    button "blue" k2 blue (RunIO (pure ())),
@@ -186,13 +191,17 @@ tests = TestList
     , "dynamic images refresh and unchanged JPEGs are not resent" ~: TestCase $ within $ do
         harness <- newHarness
         calls <- newIORef (0 :: Int)
+        release <- newEmptyMVar
         let render = do
                 count <- atomicModifyIORef' calls (\n -> (n + 1, n + 1))
+                when (count > 1) (readMVar release)
                 pure (if count <= 3 then green else blue)
             pages = [Page "main" [statefulButton "dynamic" k0 "live"
                 [state "live" (refreshEvery 0.005 render) (RunIO (pure ()))]]]
         withRuntime harness pages $ do
             _ <- ready harness
+            awaitImage harness k0 green
+            putMVar release ()
             awaitImage harness k0 blue
             written <- readTVarIO (drawLog harness)
             let copies image = length [() | (key, bytes) <- written, key == k0, bytes == imageBytes image]
@@ -203,8 +212,10 @@ tests = TestList
     , "renderer failure retries without breaking the page" ~: TestCase $ within $ do
         harness <- newHarness
         calls <- newIORef (0 :: Int)
+        release <- newEmptyMVar
         let render = do
                 count <- atomicModifyIORef' calls (\n -> (n + 1, n + 1))
+                when (count > 1) (readMVar release)
                 case count of
                     1 -> pure green
                     2 -> ioError (userError "expected appearance failure")
@@ -214,7 +225,94 @@ tests = TestList
         withRuntime harness pages $ do
             _ <- ready harness
             awaitImage harness k0 green
+            putMVar release ()
             awaitImage harness k0 blue
+    , "fast dynamic images join the initial frame" ~: TestCase $ within $ do
+        harness <- newHarness
+        let pages = [Page "main" [statefulButton "fast" k0 "live"
+                [state "live" (refreshEvery 3600 (pure green)) NextState]]]
+        withRuntime harness pages $ do
+            _ <- ready harness
+            assertImage harness k0 green
+            sent <- readTVarIO (batches harness)
+            assertEqual "one initial frame" [15] (map length sent)
+            assertEqual "dynamic image already in frame" [imageBytes green]
+                [bytes | batch <- sent, (key, bytes) <- batch, key == k0]
+    , "15 slow renderers share one preparation deadline" ~: TestCase $ within $ do
+        harness <- newHarness
+        never <- newEmptyMVar
+        started <- newTVarIO (0 :: Int)
+        let render = atomically (modifyTVar' started (+ 1)) >> takeMVar never
+            keys = [knownKey row column | row <- [0..2], column <- [0..4]]
+            pages = [Page "main" [statefulButton (show key) key "live"
+                [state "live" (refreshEvery 3600 render) NextState] | key <- keys]]
+        before <- getMonotonicTimeNSec
+        withRuntime harness pages $ do
+            _ <- ready harness
+            after <- getMonotonicTimeNSec
+            -- Generous margin over the 50 ms global budget, but below 15*50 ms.
+            assertBool "deadline is page-wide, not per button" (after - before < 500000000)
+            atomically (readTVar started >>= check . (== 15))
+            assertEqual "placeholder frame sent once" [15] . map length =<< readTVarIO (batches harness)
+    , "returning to a slow dynamic state uses its cached image" ~: TestCase $ within $ do
+        harness <- newHarness
+        calls <- newIORef (0 :: Int)
+        never <- newEmptyMVar
+        let render = do
+                count <- atomicModifyIORef' calls (\n -> (n + 1, n + 1))
+                if count == 1 then pure green else takeMVar never
+            pages = [Page "main" [statefulButton "cached" k0 "live"
+                        [state "live" (refreshEvery 3600 render) NextState],
+                        button "next" k1 red (SwitchPage "other")],
+                     Page "other" [button "back" k14 blue (SwitchPage "main")]]
+        withRuntime harness pages $ do
+            _ <- ready harness
+            assertImage harness k0 green
+            press harness k1
+            _ <- ready harness
+            press harness k14
+            _ <- ready harness
+            assertImage harness k0 green
+    , "a result arriving during initial transfer is not lost" ~: TestCase $ within $ do
+        harness <- newHarness
+        writing <- newEmptyMVar
+        finishTransfer <- newEmptyMVar
+        finishRender <- newEmptyMVar
+        rendererDone <- newEmptyMVar
+        count <- newIORef (0 :: Int)
+        let base = driver harness
+            backend = base { drawPageFrame = \images -> do
+                n <- atomicModifyIORef' count (\value -> (value + 1, value))
+                when (n == 0) (putMVar writing () >> takeMVar finishTransfer)
+                drawPageFrame base images }
+            render = takeMVar finishRender >> putMVar rendererDone () >> pure green
+            pages = [Page "main" [statefulButton "late" k0 "live"
+                [state "live" (refreshEvery 3600 render) NextState]]]
+        config <- right (compilePages "main" pages)
+        withAsync (runPageRuntime backend (notify harness) config) $ \worker -> do
+            link worker
+            takeMVar writing
+            putMVar finishRender ()
+            takeMVar rendererDone
+            putMVar finishTransfer ()
+            _ <- ready harness
+            awaitImage harness k0 green
+    , "a preparation failure sends no partial frame" ~: TestCase $ within $ do
+        harness <- newHarness
+        config <- right (compilePages "main" [Page "main"
+            [button "first" k0 red NextState,
+             button "broken" k1 (error "expected image preparation failure") NextState]])
+        outcome <- try (runPageRuntime (driver harness) (notify harness) config) :: IO (Either SomeException ())
+        assertBool "preparation error reported" (isLeft outcome)
+        assertEqual "no keys sent before complete preparation" [] =<< readTVarIO (batches harness)
+    , "a failed transfer does not announce an active page" ~: TestCase $ within $ do
+        harness <- newHarness
+        let backend = (driver harness) { drawPageFrame = \_ -> ioError (userError "expected transfer failure") }
+        config <- right (compilePages "main" [Page "main" []])
+        outcome <- try (runPageRuntime backend (notify harness) config) :: IO (Either IOException ())
+        assertBool "transfer error reported" (isLeft outcome)
+        assertEqual "failed page not activated" Nothing . fmap currentPage =<<
+            atomically (tryReadTQueue (activations harness))
     , "inactive renderers pause and active renderers cancel on state change" ~: TestCase $ within $ do
         harness <- newHarness
         started <- newEmptyMVar
@@ -342,6 +440,7 @@ data Harness = Harness
     , draws :: TQueue (Key, BS.ByteString)
     , screen :: TVar (Map.Map Key BS.ByteString)
     , drawLog :: TVar [(Key, BS.ByteString)]
+    , batches :: TVar [[(Key, BS.ByteString)]]
     , flushCount :: TVar Int
     }
 
@@ -352,17 +451,20 @@ newHarness = do
     images <- newTQueueIO
     pixels <- newTVarIO Map.empty
     logVar <- newTVarIO []
+    batchVar <- newTVarIO []
     flushes <- newTVarIO 0
     let poll = do
             expired <- registerDelay 10000
             atomically $ readTQueue incoming `orElse` (readTVar expired >>= check >> pure [])
         flush = atomically (modifyTVar' flushes (+ 1) >> drain incoming)
-        draw key image = atomically $ do
-            let bytes = imageBytes image
-            modifyTVar' pixels (Map.insert key bytes)
-            modifyTVar' logVar (++ [(key, bytes)])
-            writeTQueue images (key, bytes)
-    pure (Harness (PageDriver poll flush draw) incoming views images pixels logVar flushes)
+        draw changes = atomically $ do
+            modifyTVar' batchVar (++ [map (\(key, image) -> (key, imageBytes image)) changes])
+            forM_ changes $ \(key, image) -> do
+                let bytes = imageBytes image
+                modifyTVar' pixels (Map.insert key bytes)
+                modifyTVar' logVar (++ [(key, bytes)])
+                writeTQueue images (key, bytes)
+    pure (Harness (PageDriver poll flush draw) incoming views images pixels logVar batchVar flushes)
   where
     drain queue = tryReadTQueue queue >>= maybe (pure ()) (const (drain queue))
 

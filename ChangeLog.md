@@ -2,6 +2,14 @@
 
 ## Unreleased changes
 
+- Batch changed page keys under one native I/O lock and pause input polling
+  throughout a frame transfer, eliminating per-packet input-poll stalls.
+- Cache key-specific USB packets and force complete frame preparation before
+  presentation; retain changed-key deduplication and safe error cleanup.
+- Give all visible dynamic renderers one shared 50 ms initial-frame budget, using
+  cached/blank fallbacks for slow jobs and retaining results arriving mid-transfer.
+- Add a live page-transfer benchmark and regression tests for batch scheduling,
+  complete preparation, frame callbacks, deadlines, caching, and late results.
 - Bundle DejaVu Sans and add `loadTextFont`, two-line `renderLabeledText`, and
   `labeledClockImage` with independently fitted title/value and stable clock digits.
 - Update the cycling clock to Munich, London, and Sydney, with each city above

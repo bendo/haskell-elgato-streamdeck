@@ -12,20 +12,20 @@ module DeviceManager
   , readKeyEvents
   , flushKeyEvents
   , setKeyImage
+  , setKeyImages
   )
 where
 
 import           Control.Concurrent.MVar (MVar, modifyMVar, newMVar, withMVar)
 import           Control.Exception (bracket)
-import           Control.Monad (forM_, unless)
 import qualified Data.ByteString as BS
 import qualified Data.Word       as DW
 import           System.HIDAPI   (DeviceInfo)
 import qualified System.HIDAPI   as HID
 import qualified StreamDeck.Transport as Transport
-import           StreamDeck.Image (KeyImage, imageBytes)
+import           StreamDeck.Image (KeyImage, prepareImageReports)
 import           StreamDeck.Protocol
-    ( Key, KeyEvent, KeyState, decodeKeyReport, idleKeyState, imageReports, keyEvents )
+    ( Key, KeyEvent, KeyState, decodeKeyReport, idleKeyState, keyEvents )
 
 -- StreamDeckMini 0x0063
 -- StreamDeckOriginal 0x0060
@@ -103,9 +103,12 @@ readKeyReport (Deck device state _) timeout
 
 -- | Send a prepared image. Serialize complete images so their pages cannot interleave.
 setKeyImage :: Deck -> Key -> KeyImage -> IO ()
-setKeyImage (Deck device _ outputLock) key image = do
-    reports <- either (ioError . userError) pure (imageReports key (imageBytes image))
-    withMVar outputLock $ \_ -> forM_ reports $ \report -> do
-        written <- Transport.write device report
-        unless (written == BS.length report) $
-            ioError (userError "Incomplete MK2 image report write")
+setKeyImage deck key image = setKeyImages deck [(key, image)]
+
+-- | Prepare the whole frame first, then send it under one output/native lock.
+-- MK2 still updates individual keys; this is an uninterrupted burst, not a
+-- hardware-atomic page swap. Callers can omit unchanged keys.
+setKeyImages :: Deck -> [(Key, KeyImage)] -> IO ()
+setKeyImages (Deck device _ outputLock) images = do
+    reports <- concat <$> mapM (uncurry prepareImageReports) images
+    withMVar outputLock $ \_ -> Transport.writeMany device reports
