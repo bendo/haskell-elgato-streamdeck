@@ -2,6 +2,14 @@
 
 ## Unreleased changes
 
+- Add styled TrueType glyph and single-line text rendering with automatic fitting,
+  centering, antialiasing, colors, padding, and missing-glyph errors.
+- Bundle Font Awesome Free 6.7.2 solid, regular, and brand fonts with their SIL OFL
+  license; add named audio, Spotify, media, and weather icon helpers.
+- Add `examples/FontAwesome.hs` and upright PNG previews for any key image.
+- Test font families, glyph fitting, colors, labels, input validation, and previews.
+- Add `examples/Radio.hs`, loading `~/radio.jpeg` and printing `radioactive` on press.
+- Treat signal-interrupted native reads as empty polls so Ctrl-C can exit cleanly.
 - Add MK2 press/release events and prepared key-image output with serialized writes.
 - Add image loading, resizing, orientation correction, JPEG encoding, and solid colors.
 - Add `StreamDeck.runDeck` and a single-file example with queued press actions.

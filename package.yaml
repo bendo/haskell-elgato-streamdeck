@@ -13,6 +13,13 @@ extra-source-files:
 - README.md
 - ChangeLog.md
 - examples/MyDeck.hs
+- examples/Radio.hs
+- examples/FontAwesome.hs
+- fonts/fontawesome/README.md
+
+data-files:
+- fonts/fontawesome/*.ttf
+- fonts/fontawesome/LICENSE.txt
 
 description:         Please see the README on GitHub at <https://github.com/bendo/haskell-elgato-streamdeck#readme>
 
@@ -26,11 +33,15 @@ dependencies:
 
 library:
   source-dirs: src
+  c-sources: cbits/read_timeout.c
   dependencies:
   - hidapi >= 0.1.8 && < 0.2
   - bytestring >= 0.11 && < 0.13
   - JuicyPixels >= 3.3 && < 3.4
   - async >= 2.2 && < 2.3
+  - FontyFruity >= 0.5.3.5 && < 0.6
+  - Rasterific >= 0.7.5.4 && < 0.8
+  - vector >= 0.13 && < 0.14
 
 executables:
   haskell-elgato-streamdeck-exe:
@@ -43,6 +54,7 @@ executables:
     dependencies:
     - haskell-elgato-streamdeck
     - hidapi >= 0.1.8 && < 0.2
+
 
 tests:
   haskell-elgato-streamdeck-test:
@@ -59,3 +71,4 @@ tests:
     - HUnit >= 1.6 && < 1.7
     - async >= 2.2 && < 2.3
     - hidapi >= 0.1.8 && < 0.2
+    - directory >= 1.3 && < 1.4

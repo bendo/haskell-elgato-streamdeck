@@ -1,11 +1,11 @@
 -- | MK2 images: resize to 72x72, rotate for the device, then encode as JPEG.
 module StreamDeck.Image
-    ( KeyImage, imageBytes, prepareKeyImage, loadKeyImage, solidColor
+    ( KeyImage, imageBytes, prepareKeyImage, loadKeyImage, solidColor, saveKeyImagePreview
     ) where
 
 import Codec.Picture
     ( Image, PixelRGB8 (..), PixelYCbCr8, convertRGB8, encodeJpegAtQuality
-    , generateImage, imageWidth, imageHeight, pixelAt, readImage
+    , decodeJpeg, generateImage, imageWidth, imageHeight, pixelAt, readImage, writePng
     )
 import Codec.Picture.Types (convertImage)
 import qualified Data.ByteString as BS
@@ -44,3 +44,9 @@ solidColor red green blue = KeyImage $ BL.toStrict $
     encodeJpegAtQuality 95 (convertImage rgb :: Image PixelYCbCr8)
   where
     rgb = generateImage (\_ _ -> PixelRGB8 red green blue) 72 72
+
+-- | Save an upright PNG preview of the exact JPEG sent to the device.
+saveKeyImagePreview :: FilePath -> KeyImage -> IO ()
+saveKeyImagePreview path image = do
+    native <- convertRGB8 <$> either (ioError . userError) pure (decodeJpeg (imageBytes image))
+    writePng path $ generateImage (\x y -> pixelAt native (71 - x) (71 - y)) 72 72

@@ -11,6 +11,7 @@ import qualified Data.ByteString as BS
 import Data.Either (isLeft)
 import Data.Word (Word8)
 import DeviceManager (withHIDAPI)
+import qualified FontSpec
 import StreamDeck (Button (..), runDeck, solidColor)
 import StreamDeck.Image (imageBytes, prepareKeyImage)
 import StreamDeck.Protocol
@@ -29,7 +30,8 @@ main = do
 
 tests :: Test
 tests = TestList
-    [ "key positions" ~: TestCase $ do
+    [ FontSpec.tests
+    , "key positions" ~: TestCase $ do
         forM_ [(row, column) | row <- [0..2], column <- [0..4]] $ \position@(row, column) -> do
             key <- right (keyAt row column)
             assertEqual "position round trip" position (keyPosition key)

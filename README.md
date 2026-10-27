@@ -67,6 +67,88 @@ of `runghc` when ready to deploy it. With Cabal, run the example using:
 cabal exec -- runghc -package=haskell-elgato-streamdeck examples/MyDeck.hs
 ```
 
+`examples/Radio.hs` loads `~/radio.jpeg` onto the top-left key and prints
+`radioactive` whenever you press it:
+
+```sh
+cabal build all
+cabal exec -- runghc -package=haskell-elgato-streamdeck examples/Radio.hs
+```
+
+JPEG files work directly; no PNG conversion is necessary.
+
+## Font Awesome icons and text
+
+Font Awesome Free **6.7.2** is bundled with the library. No system font installation
+or runtime download is needed. It has three complementary fonts:
+
+| Font | Examples |
+| --- | --- |
+| Solid | Volume, media controls, sun, cloud, rain, wind, temperature |
+| Regular | Outline variants such as sun, snowflake, heart |
+| Brands | Spotify and other brand logos |
+
+Run a single-file example with ten icons on the first two rows:
+
+```sh
+cabal build all
+cabal exec -- runghc -package=haskell-elgato-streamdeck examples/FontAwesome.hs
+```
+
+The buttons print their names when pressed. You can replace those actions with
+your own functions for Spotify, volume control, or weather integrations.
+
+```haskell
+import StreamDeck
+import qualified StreamDeck.FontAwesome as FA
+
+main :: IO ()
+main = do
+    fonts <- FA.loadFontAwesome
+    first <- either fail pure (keyAt 0 0)
+    image <- either fail pure $ FA.renderAwesomeIcon fonts
+        defaultIconStyle { foreground = RGB 30 215 96, padding = 10 }
+        FA.spotify
+    runDeck [Button first image (putStrLn "Spotify")]
+```
+
+Named helpers include `spotify`, `volumeHigh`, `volumeLow`, `volumeXmark`, `sun`,
+`cloud`, `cloudSun`, `cloudRain`, `cloudShowersHeavy`, `snowflake`, `wind`, `bolt`,
+`temperatureHalf`, `radiation`, `play`, `pause`, `forwardStep`, `backwardStep`,
+`headphones`, `terminal`, and `heart`. These are shortcuts, not a restriction on
+the available glyphs. Any other Free icon can be selected by style and Unicode
+from the [Font Awesome 6 catalogue](https://fontawesome.com/v6/search?ic=free):
+
+```haskell
+-- Regular/outline sun instead of the solid variant:
+let outlineSun = FA.AwesomeIcon FA.Regular '\xf185'
+```
+
+`IconStyle` controls `foreground`, `background`, and `padding` (0..35 pixels).
+The renderer preserves aspect ratio, centers the glyph outlines, antialiases
+edges, and produces a ready-to-use `KeyImage`. Missing glyphs are reported rather
+than silently drawing a replacement box. Font Awesome Pro glyphs are not included.
+
+For ordinary text or another icon font, use `loadFont` with an explicit `.ttf`
+path, then `renderText font style "Mute"` or `renderGlyph font style character`.
+Text is a single line fitted to the key. Complex-script shaping, multiline layout,
+and automatic font fallback are not implemented. Font Awesome itself is an icon
+font; use a regular text font for arbitrary labels.
+
+You can inspect icons without a connected deck by saving upright PNG previews:
+
+```sh
+cabal exec -- runghc -package=haskell-elgato-streamdeck examples/FontAwesome.hs --preview /tmp/deck
+```
+
+This writes `/tmp/deck-spotify.png`, `/tmp/deck-volume.png`, and the other icons.
+The parent directory of the output prefix must exist. In your own code,
+`saveKeyImagePreview "preview.png" image` saves the exact encoded image in its
+upright orientation.
+
+Font files retain their **SIL OFL 1.1** license and attribution in
+`fonts/fontawesome/LICENSE.txt`; see that directory's README for their source.
+
 - Positions are **zero-based**: rows `0..2`, columns `0..4`, left-to-right and
   top-to-bottom. `keyAt` validates the position.
 - `loadKeyImage "icons/terminal.png"` loads PNG/JPEG and other JuicyPixels formats.
@@ -126,8 +208,9 @@ stack test
 
 The tests run without hardware and cover key positions and transitions, malformed
 reports, JPEG sizing/orientation, image packet boundaries, duplicate bindings,
-action ordering, error recovery, and worker cancellation. Use the diagnostics and
-example above for live hardware checks.
+action ordering, error recovery, worker cancellation, bundled font glyphs, font
+colors/centering/padding, missing glyphs, labels, and PNG previews. Use the
+diagnostics and examples above for live hardware checks.
 
 Native I/O uses a small local wrapper around the C implementation bundled by
 `hidapi`. This avoids the binding's incorrect freeing of HIDAPI-owned error
@@ -137,5 +220,5 @@ regression test exercises error handling and closing without a physical deck.
 
 The MK2 packet format is cross-checked against the
 [python-elgato-streamdeck Original V2 implementation](https://github.com/abcminiuser/python-elgato-streamdeck/blob/master/src/StreamDeck/Devices/StreamDeckOriginalV2.py),
-which also handles the MK2. Other deck models, automatic reconnection, text labels,
-and pages are not implemented yet.
+which also handles the MK2. Other deck models, automatic reconnection, and pages
+are not implemented yet.

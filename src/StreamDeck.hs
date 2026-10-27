@@ -3,12 +3,15 @@ module StreamDeck
     ( Button (..), runDeck
     , Key, keyAt, keyIndex, keyPosition, KeyEvent (..)
     , KeyImage, loadKeyImage, solidColor
+    , saveKeyImagePreview
+    , Font, loadFont, Color (..), IconStyle (..), defaultIconStyle, renderGlyph, renderText
     ) where
 
 import Control.Monad (forM_, unless)
 import Data.List (nub)
 import qualified DeviceManager as Device
-import StreamDeck.Image (KeyImage, loadKeyImage, solidColor)
+import StreamDeck.Font (Font, loadFont, Color (..), IconStyle (..), defaultIconStyle, renderGlyph, renderText)
+import StreamDeck.Image (KeyImage, loadKeyImage, solidColor, saveKeyImagePreview)
 import StreamDeck.Protocol (Key, KeyEvent (..), keyAt, keyIndex, keyPosition)
 import StreamDeck.Runtime (runEventLoop)
 

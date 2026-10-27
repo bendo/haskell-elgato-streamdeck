@@ -24,7 +24,7 @@ foreign import ccall safe "hid_open_path"
     nativeOpen :: CString -> IO (Ptr NativeDevice)
 foreign import ccall safe "hid_close"
     nativeClose :: Ptr NativeDevice -> IO ()
-foreign import ccall safe "hid_read_timeout"
+foreign import ccall safe "streamdeck_read_timeout"
     nativeRead :: Ptr NativeDevice -> Ptr Word8 -> CSize -> CInt -> IO CInt
 foreign import ccall safe "hid_write"
     nativeWrite :: Ptr NativeDevice -> Ptr Word8 -> CSize -> IO CInt
