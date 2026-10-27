@@ -9,14 +9,22 @@ module DeviceManager
   , close
   , serialNumber
   , firmwareVersion
+  , readKeyEvents
+  , setKeyImage
   )
 where
 
+import           Control.Concurrent.MVar (MVar, modifyMVar, newMVar, withMVar)
 import           Control.Exception (bracket)
+import           Control.Monad (forM_, unless)
 import qualified Data.ByteString as BS
 import qualified Data.Word       as DW
 import           System.HIDAPI   (DeviceInfo)
 import qualified System.HIDAPI   as HID
+import qualified StreamDeck.Transport as Transport
+import           StreamDeck.Image (KeyImage, imageBytes)
+import           StreamDeck.Protocol
+    ( Key, KeyEvent, KeyState, decodeKeyReport, idleKeyState, imageReports, keyEvents )
 
 -- StreamDeckMini 0x0063
 -- StreamDeckOriginal 0x0060
@@ -25,7 +33,7 @@ import qualified System.HIDAPI   as HID
 
 data DeckType = StreamDeckMini | StreamDeck | StreamDeckMK2 | StreamDeckXL
 
-newtype Deck = Deck HID.Device
+data Deck = Deck Transport.Device (MVar KeyState) (MVar ())
 
 vendorId :: DW.Word16
 vendorId = 0x0fd9
@@ -52,15 +60,40 @@ withDevice deviceInfo = bracket (open deviceInfo) close
 
 -- | Open a device within 'withHIDAPI'. Prefer 'withDevice' for automatic cleanup.
 open :: DeviceInfo -> IO Deck
-open deviceInfo = Deck <$> HID.openDeviceInfo deviceInfo
+open deviceInfo = do
+    state <- newMVar idleKeyState
+    outputLock <- newMVar ()
+    device <- Transport.openPath (HID.path deviceInfo)
+    pure (Deck device state outputLock)
 
 -- | Close an open device exactly once, before leaving 'withHIDAPI'.
 close :: Deck -> IO ()
-close (Deck device) = HID.close device
+close (Deck device _ _) = Transport.close device
 
 serialNumber :: DeviceInfo -> Maybe String
 serialNumber = HID.serialNumber
 
 -- | Read the raw MK2 firmware feature report (report ID and payload).
 firmwareVersion :: Deck -> IO (DW.Word8, BS.ByteString)
-firmwareVersion (Deck device) = HID.getFeatureReport device 0x06 32
+firmwareVersion (Deck device _ _) = Transport.getFeatureReport device 0x05 32
+
+-- | Wait up to the supplied milliseconds for a report; return transitions only.
+-- A timeout returns no events and preserves the previous state. Reads are serialized.
+readKeyEvents :: Deck -> Int -> IO [KeyEvent]
+readKeyEvents (Deck device state _) timeout
+    | timeout < 0 || toInteger timeout > 2147483647 =
+        ioError (userError "Read timeout must be within 0..2147483647 milliseconds")
+    | otherwise = modifyMVar state $ \previous -> do
+        report <- Transport.readTimeout device 19 timeout
+        if BS.null report then pure (previous, []) else do
+            current <- either (ioError . userError) pure (decodeKeyReport report)
+            pure (current, keyEvents previous current)
+
+-- | Send a prepared image. Serialize complete images so their pages cannot interleave.
+setKeyImage :: Deck -> Key -> KeyImage -> IO ()
+setKeyImage (Deck device _ outputLock) key image = do
+    reports <- either (ioError . userError) pure (imageReports key (imageBytes image))
+    withMVar outputLock $ \_ -> forM_ reports $ \report -> do
+        written <- Transport.write device report
+        unless (written == BS.length report) $
+            ioError (userError "Incomplete MK2 image report write")

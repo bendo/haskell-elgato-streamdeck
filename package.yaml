@@ -12,6 +12,7 @@ tested-with:         GHC == 9.10.3
 extra-source-files:
 - README.md
 - ChangeLog.md
+- examples/MyDeck.hs
 
 description:         Please see the README on GitHub at <https://github.com/bendo/haskell-elgato-streamdeck#readme>
 
@@ -28,6 +29,8 @@ library:
   dependencies:
   - hidapi >= 0.1.8 && < 0.2
   - bytestring >= 0.11 && < 0.13
+  - JuicyPixels >= 3.3 && < 3.4
+  - async >= 2.2 && < 2.3
 
 executables:
   haskell-elgato-streamdeck-exe:
@@ -51,3 +54,8 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - haskell-elgato-streamdeck
+    - bytestring >= 0.11 && < 0.13
+    - JuicyPixels >= 3.3 && < 3.4
+    - HUnit >= 1.6 && < 1.7
+    - async >= 2.2 && < 2.3
+    - hidapi >= 0.1.8 && < 0.2
