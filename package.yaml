@@ -5,27 +5,29 @@ license:             BSD3
 author:              "Zdenko Osina"
 maintainer:          "zdeno.osina@gmail.com"
 copyright:           "2022 Zdenko Osina"
+synopsis:            Build small Haskell applications for the Elgato Stream Deck
+category:            Hardware
+tested-with:         GHC == 9.10.3
 
 extra-source-files:
 - README.md
 - ChangeLog.md
 
-# Metadata used when publishing your package
-# synopsis:            Short description of your package
-# category:            Web
-
-# To avoid duplicated efforts in documentation and dealing with the
-# complications of embedding Haddock markup inside cabal files, it is
-# common to point users to the README.md file.
 description:         Please see the README on GitHub at <https://github.com/bendo/haskell-elgato-streamdeck#readme>
 
+language: Haskell2010
+ghc-options:
+- -Wall
+- -Wcompat
+
 dependencies:
-- base >= 4.7 && < 5
-- hidapi
-- bytestring
+- base >= 4.20 && < 5
 
 library:
   source-dirs: src
+  dependencies:
+  - hidapi >= 0.1.8 && < 0.2
+  - bytestring >= 0.11 && < 0.13
 
 executables:
   haskell-elgato-streamdeck-exe:
@@ -37,6 +39,7 @@ executables:
     - -with-rtsopts=-N
     dependencies:
     - haskell-elgato-streamdeck
+    - hidapi >= 0.1.8 && < 0.2
 
 tests:
   haskell-elgato-streamdeck-test:

@@ -1,12 +1,14 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.34.4.
+-- This file has been generated from package.yaml by hpack version 0.39.6.
 --
 -- see: https://github.com/sol/hpack
 
 name:           haskell-elgato-streamdeck
 version:        0.1.0.0
+synopsis:       Build small Haskell applications for the Elgato Stream Deck
 description:    Please see the README on GitHub at <https://github.com/bendo/haskell-elgato-streamdeck#readme>
+category:       Hardware
 homepage:       https://github.com/bendo/haskell-elgato-streamdeck#readme
 bug-reports:    https://github.com/bendo/haskell-elgato-streamdeck/issues
 author:         Zdenko Osina
@@ -15,6 +17,8 @@ copyright:      2022 Zdenko Osina
 license:        BSD3
 license-file:   LICENSE
 build-type:     Simple
+tested-with:
+    GHC == 9.10.3
 extra-source-files:
     README.md
     ChangeLog.md
@@ -30,10 +34,11 @@ library
       Paths_haskell_elgato_streamdeck
   hs-source-dirs:
       src
+  ghc-options: -Wall -Wcompat
   build-depends:
-      base >=4.7 && <5
-    , bytestring
-    , hidapi
+      base >=4.20 && <5
+    , bytestring >=0.11 && <0.13
+    , hidapi >=0.1.8 && <0.2
   default-language: Haskell2010
 
 executable haskell-elgato-streamdeck-exe
@@ -42,12 +47,11 @@ executable haskell-elgato-streamdeck-exe
       Paths_haskell_elgato_streamdeck
   hs-source-dirs:
       app
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -Wall -Wcompat -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
-    , bytestring
+      base >=4.20 && <5
     , haskell-elgato-streamdeck
-    , hidapi
+    , hidapi >=0.1.8 && <0.2
   default-language: Haskell2010
 
 test-suite haskell-elgato-streamdeck-test
@@ -57,10 +61,8 @@ test-suite haskell-elgato-streamdeck-test
       Paths_haskell_elgato_streamdeck
   hs-source-dirs:
       test
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -Wall -Wcompat -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
-    , bytestring
+      base >=4.20 && <5
     , haskell-elgato-streamdeck
-    , hidapi
   default-language: Haskell2010

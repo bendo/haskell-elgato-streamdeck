@@ -1,15 +1,23 @@
 module Main where
 
-import           DeviceManager (enumerate, open, serialNumber)
+import           Control.Exception (catch)
+import           Data.Maybe (fromMaybe)
+import           DeviceManager (enumerate, serialNumber, withDevice, withHIDAPI)
+import           System.Exit (die)
+import           System.HIDAPI (HIDAPIException)
 
 main :: IO ()
-main = do
+main = discover `catch` reportHIDError
+
+reportHIDError :: HIDAPIException -> IO ()
+reportHIDError err = die ("Stream Deck: " ++ show err)
+
+discover :: IO ()
+discover = withHIDAPI $ do
     decks <- enumerate
-    if null decks
-        then print "No Stremdeck Found."
-    else do
-        print ("Found " ++ show (length decks) ++ " streamdeck(s).")
-        let deckInfo = head decks
-        print ("Serial number: " ++ serialNumber deckInfo)
-        deck <- open deckInfo
-        print "OK"
+    case decks of
+        [] -> putStrLn "No Stream Deck MK2 found."
+        deckInfo : _ -> do
+            putStrLn ("Found " ++ show (length decks) ++ " Stream Deck MK2 device(s).")
+            putStrLn ("Serial number: " ++ fromMaybe "unknown" (serialNumber deckInfo))
+            withDevice deckInfo $ \_ -> putStrLn "Device opened successfully."
