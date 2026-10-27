@@ -2,6 +2,9 @@
 
 ## Unreleased changes
 
+- Add push, pull-request, and manual GitHub Actions checks on Ubuntu (GHC 9.10.3
+  and 9.12.2) and an upgraded Arch Linux container (GHC 9.12.2), with native X11
+  tests, example checks, preview artifacts, and distribution-specific caches.
 - Batch changed page keys under one native I/O lock and pause input polling
   throughout a frame transfer, eliminating per-packet input-poll stalls.
 - Cache key-specific USB packets and force complete frame preparation before

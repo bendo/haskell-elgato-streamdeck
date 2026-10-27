@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CABAL_VERSION: '3.16.1.0'
+  LANG: C.UTF-8
+  TZ: UTC
+
+jobs:
+  ubuntu:
+    name: Ubuntu / GHC ${{ matrix.ghc }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        ghc: ['9.10.3', '9.12.2']
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libgmp-dev libffi-dev libncurses-dev libnuma-dev \
+            libudev-dev libx11-dev libxtst-dev zlib1g-dev \
+            xvfb xauth x11-xkb-utils
+
+      - name: Set up Haskell
+        id: haskell
+        uses: haskell-actions/setup@7fd2bb5ca789761088fbc831406b2910e47e56f1 # v2
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: ${{ env.CABAL_VERSION }}
+          cabal-update: false
+
+      - name: Fingerprint native dependencies
+        id: native
+        run: |
+          versions="$(pkg-config --modversion libudev x11 xtst zlib)"
+          printf '%s\n' "$versions"
+          digest="$(printf '%s\n' "$versions" | sha256sum)"
+          printf 'hash=%s\n' "${digest%% *}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Cabal dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.haskell.outputs.cabal-store }}
+          key: ubuntu-24.04-ghc-${{ matrix.ghc }}-cabal-${{ env.CABAL_VERSION }}-${{ steps.native.outputs.hash }}-${{ hashFiles('**/*.cabal', 'package.yaml') }}
+          restore-keys: |
+            ubuntu-24.04-ghc-${{ matrix.ghc }}-cabal-${{ env.CABAL_VERSION }}-${{ steps.native.outputs.hash }}-
+
+      - name: Build, test, and check examples
+        run: bash .github/scripts/ci.sh
+
+      - name: Upload logs and image previews
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ubuntu-ghc-${{ matrix.ghc }}
+          path: |
+            ${{ runner.temp }}/streamdeck-ci
+            dist-newstyle/**/test/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  arch:
+    name: Arch Linux / GHC 9.12.2
+    runs-on: ubuntu-24.04
+    container:
+      image: archlinux:base
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Bootstrap before checkout: the base image does not contain Git. The full
+      # upgrade keeps Arch's rolling packages consistent (no partial upgrades).
+      - name: Install Arch dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel git curl ca-certificates tar gzip xz zstd \
+            gmp libffi ncurses numactl systemd-libs libx11 libxtst zlib \
+            xorg-server-xvfb xorg-xauth xorg-setxkbmap
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Haskell
+        id: haskell
+        uses: haskell-actions/setup@7fd2bb5ca789761088fbc831406b2910e47e56f1 # v2
+        with:
+          ghc-version: '9.12.2'
+          cabal-version: ${{ env.CABAL_VERSION }}
+          cabal-update: false
+
+      - name: Fingerprint native dependencies
+        id: native
+        run: |
+          versions="$(pkg-config --modversion libudev x11 xtst zlib)"
+          printf '%s\n' "$versions"
+          digest="$(printf '%s\n' "$versions" | sha256sum)"
+          printf 'hash=%s\n' "${digest%% *}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Cabal dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.haskell.outputs.cabal-store }}
+          key: arch-ghc-9.12.2-cabal-${{ env.CABAL_VERSION }}-${{ steps.native.outputs.hash }}-${{ hashFiles('**/*.cabal', 'package.yaml') }}
+          restore-keys: |
+            arch-ghc-9.12.2-cabal-${{ env.CABAL_VERSION }}-${{ steps.native.outputs.hash }}-
+
+      - name: Build, test, and check examples
+        run: bash .github/scripts/ci.sh
+
+      - name: Upload logs and image previews
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: arch-ghc-9.12.2
+          path: |
+            ${{ runner.temp }}/streamdeck-ci
+            dist-newstyle/**/test/*.log
+          if-no-files-found: ignore
+          retention-days: 7
